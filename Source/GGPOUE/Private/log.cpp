@@ -8,6 +8,7 @@
 #include "log.h"
 #include "types.h"
 #include "GGPOUE_Settings.h"
+#include "Engine/Engine.h"
 
 static char logbuf[4 * 1024 * 1024];
 
@@ -45,11 +46,26 @@ void Logv(EGGPOLogVerbosity Verbosity, const char *fmt, va_list args)
       vsprintf_s(logbuf, ARRAY_SIZE(logbuf), fmt, args);
       FString Message = FString(strlen(logbuf), logbuf);
 
-      Message.InsertAt(0, FString::Printf(TEXT("GGPO :: "), GPlayInEditorID));
-      // If this is an instance playing in the editor, include its Id
-      if (GPlayInEditorID >= 0)
+      Message.InsertAt(0, TEXT("GGPO :: "));
+
+      // GPlayInEditorID was removed from newer Unreal versions. Resolve the
+      // current PIE instance through the engine world contexts instead.
+      int32 PIEInstance = INDEX_NONE;
+      if (GEngine)
       {
-          Message.InsertAt(0, FString::Printf(TEXT("PIE %d-"), GPlayInEditorID));
+          for (const FWorldContext& WorldContext : GEngine->GetWorldContexts())
+          {
+              if (WorldContext.WorldType == EWorldType::PIE)
+              {
+                  PIEInstance = WorldContext.PIEInstance;
+                  break;
+              }
+          }
+      }
+
+      if (PIEInstance >= 0)
+      {
+          Message.InsertAt(0, FString::Printf(TEXT("PIE %d-"), PIEInstance));
       }
 
       UE_LOG(LogNet, Display, TEXT("%s"), *Message);

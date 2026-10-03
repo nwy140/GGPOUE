@@ -9,6 +9,7 @@
 
 #include "CoreMinimal.h"
 #include <stdarg.h>
+#include <functional>
 #include "../../Private/log.h"
 #include "ggponet.generated.h"
 
