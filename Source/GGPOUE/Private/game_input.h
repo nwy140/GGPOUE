@@ -14,7 +14,9 @@
 // GAMEINPUT_MAX_BYTES * GAMEINPUT_MAX_PLAYERS * 8 must be less than
 // 2^BITVECTOR_NIBBLE_SIZE (see bitvector.h)
 
-#define GAMEINPUT_MAX_BYTES      9
+// SLS contextual input includes a 16-bit intent mask and synchronized look pitch.
+// 30 * 2 * 8 = 480 fits the project's 9-bit compressed bit index.
+#define GAMEINPUT_MAX_BYTES      30
 #define GAMEINPUT_MAX_PLAYERS    2
 
 struct GameInput {
