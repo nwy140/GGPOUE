@@ -105,6 +105,11 @@ GGPONet::ggpo_idle(GGPOSession *ggpo, int timeout)
    return ggpo->DoPoll(timeout);
 }
 
+int GGPONet::ggpo_get_last_confirmed_frame(GGPOSession* ggpo)
+{
+   return ggpo ? ggpo->GetLastConfirmedFrame() : -1;
+}
+
 GGPOErrorCode
 GGPONet::ggpo_add_local_input(GGPOSession *ggpo,
                      GGPOPlayerHandle player,

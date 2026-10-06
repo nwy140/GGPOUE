@@ -652,6 +652,8 @@ public:
      */
     static GGPO_API GGPOErrorCode __cdecl ggpo_idle(GGPOSession*,
         int timeout);
+    // Read-only P2P input confirmation frontier; -1 for unsupported backends.
+    static GGPO_API int __cdecl ggpo_get_last_confirmed_frame(GGPOSession*);
 
     /*
      * ggpo_add_local_input --

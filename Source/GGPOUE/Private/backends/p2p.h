@@ -22,6 +22,7 @@ public:
 
 public:
    virtual GGPOErrorCode DoPoll(int timeout);
+   virtual int GetLastConfirmedFrame() const override { return _sync.GetLastConfirmedFrame(); }
    virtual GGPOErrorCode AddPlayer(GGPOPlayer *player, GGPOPlayerHandle *handle);
    virtual GGPOErrorCode AddLocalInput(GGPOPlayerHandle player, void *values, int size);
    virtual GGPOErrorCode SyncInput(void *values, int size, int *disconnect_flags);
