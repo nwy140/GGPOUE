@@ -39,6 +39,11 @@ SyncTestBackend::SyncTestBackend(GGPOSessionCallbacks *cb,
 
 SyncTestBackend::~SyncTestBackend()
 {
+   EndLog();
+   while (!_saved_frames.empty()) {
+      free(_saved_frames.front().buf);
+      _saved_frames.pop();
+   }
 }
 
 GGPOErrorCode
@@ -89,6 +94,7 @@ SyncTestBackend::SyncInput(void *values,
    } else {
       if (_sync.GetFrameCount() == 0) {
          _sync.SaveCurrentFrame();
+         if (!_sync.IsHealthy()) return GGPO_ERRORCODE_GENERAL_FAILURE;
       }
       _last_input = _current_input;
    }
@@ -103,6 +109,7 @@ GGPOErrorCode
 SyncTestBackend::IncrementFrame(void)
 {  
    _sync.IncrementFrame();
+   if (!_sync.IsHealthy()) return GGPO_ERRORCODE_GENERAL_FAILURE;
    _current_input.erase();
    
    Log("End of frame(%d)...\n", _sync.GetFrameCount());
@@ -128,11 +135,14 @@ SyncTestBackend::IncrementFrame(void)
    if (frame - _last_verified == _check_distance) {
       // We've gone far enough ahead and should now start replaying frames.
       // Load the last verified frame and set the rollback flag to true.
-      _sync.LoadFrame(_last_verified);
+      if (!_sync.LoadFrame(_last_verified)) return GGPO_ERRORCODE_GENERAL_FAILURE;
 
       _rollingback = true;
       while(!_saved_frames.empty()) {
-         _callbacks.advance_frame(0);
+         if (!_callbacks.advance_frame(0) || !_sync.IsHealthy()) {
+            _rollingback = false;
+            return GGPO_ERRORCODE_GENERAL_FAILURE;
+         }
 
          // Verify that the checksumn of this frame is the same as the one in our
          // list.

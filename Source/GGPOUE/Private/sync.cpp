@@ -14,6 +14,7 @@ Sync::Sync(UdpMsg::connect_status *connect_status) :
    _framecount = 0;
    _last_confirmed_frame = -1;
    _max_prediction_frames = 0;
+   _healthy = true;
    memset(&_savedstate, 0, sizeof(_savedstate));
 }
 
@@ -37,6 +38,7 @@ Sync::Init(Sync::Config &config)
    _callbacks = config.callbacks;
    _framecount = 0;
    _rollingback = false;
+   _healthy = true;
 
    _max_prediction_frames = config.num_prediction_frames;
 
@@ -57,6 +59,7 @@ Sync::SetLastConfirmedFrame(int frame)
 bool
 Sync::AddLocalInput(int queue, GameInput &input)
 {
+   if (!_healthy) return false;
    int frames_behind = _framecount - _last_confirmed_frame; 
    if (_framecount >= _max_prediction_frames && frames_behind >= _max_prediction_frames) {
       Log("Rejecting local input: reached prediction barrier.\n");
@@ -65,6 +68,7 @@ Sync::AddLocalInput(int queue, GameInput &input)
 
    if (_framecount == 0) {
       SaveCurrentFrame();
+      if (!_healthy) return false;
    }
 
    Log("Sending undelayed local frame %d to queue %d.\n", _framecount, queue);
@@ -124,27 +128,31 @@ Sync::SynchronizeInputs(void *values, int size)
    return disconnect_flags;
 }
 
-void
+bool
 Sync::CheckSimulation(int timeout)
 {
+   if (!_healthy) return false;
    int seek_to;
    // If the simulation is no longer synched
    if (!CheckSimulationConsistency(&seek_to)) {
       // Jump back to the most recent frame that was still in synch and re-simulate
-      AdjustSimulation(seek_to);
+      return AdjustSimulation(seek_to);
    }
+   return true;
 }
 
 void
 Sync::IncrementFrame(void)
 {
+   if (!_healthy) return;
    _framecount++;
    SaveCurrentFrame();
 }
 
-void
+bool
 Sync::AdjustSimulation(int seek_to)
 {
+   if (!_healthy) return false;
    int framecount = _framecount;
    int count = _framecount - seek_to;
 
@@ -154,7 +162,7 @@ Sync::AdjustSimulation(int seek_to)
    /*
     * Flush our input queue and load the last frame.
     */
-   LoadFrame(seek_to);
+   if (!LoadFrame(seek_to)) { _rollingback = false; return false; }
    ASSERT(_framecount == seek_to);
 
    /*
@@ -163,43 +171,53 @@ Sync::AdjustSimulation(int seek_to)
     */
    ResetPrediction(_framecount);
    for (int i = 0; i < count; i++) {
-      _callbacks.advance_frame(0);
+      if (!_callbacks.advance_frame(0) || !_healthy) {
+         _healthy = false; _rollingback = false; return false;
+      }
    }
    ASSERT(_framecount == framecount);
 
    _rollingback = false;
 
    Log("---\n");   
+   return true;
 }
 
-void
+bool
 Sync::LoadFrame(int frame)
 {
+   if (!_healthy) return false;
    // find the frame in question
    if (frame == _framecount) {
       Log("Skipping NOP.\n");
-      return;
+      return true;
    }
 
    // Move the head pointer back and load it up
-   _savedstate.head = FindSavedFrameIndex(frame);
-   SavedFrame *state = _savedstate.frames + _savedstate.head;
+   const int head = FindSavedFrameIndex(frame);
+   SavedFrame *state = _savedstate.frames + head;
 
    Log("=== Loading frame info %d (size: %d  checksum: %08x).\n",
        state->frame, state->cbuf, state->checksum);
 
    ASSERT(state->buf && state->cbuf);
-   _callbacks.load_game_state(state->buf, state->cbuf);
+   if (!_callbacks.load_game_state(state->buf, state->cbuf)) {
+      _healthy = false;
+      Log("Load callback rejected frame %d; simulation halted.\n", state->frame);
+      return false;
+   }
 
    // Reset framecount and the head of the state ring-buffer to point in
    // advance of the current frame (as if we had just finished executing it).
    _framecount = state->frame;
-   _savedstate.head = (_savedstate.head + 1) % ARRAY_SIZE(_savedstate.frames);
+   _savedstate.head = (head + 1) % ARRAY_SIZE(_savedstate.frames);
+   return true;
 }
 
 void
 Sync::SaveCurrentFrame()
 {
+   if (!_healthy) return;
    /*
     * See StateCompress for the real save feature implemented by FinalBurn.
     * Write everything into the head, then advance the head pointer.
@@ -210,7 +228,12 @@ Sync::SaveCurrentFrame()
       state->buf = NULL;
    }
    state->frame = _framecount;
-   _callbacks.save_game_state(&state->buf, &state->cbuf, &state->checksum, state->frame);
+   if (!_callbacks.save_game_state(&state->buf, &state->cbuf, &state->checksum, state->frame)
+       || !state->buf || state->cbuf <= 0) {
+      _healthy = false;
+      Log("Save callback rejected frame %d; simulation halted.\n", state->frame);
+      return;
+   }
 
    Log("=== Saved frame info %d (size: %d  checksum: %08x).\n", state->frame, state->cbuf, state->checksum);
    _savedstate.head = (_savedstate.head + 1) % ARRAY_SIZE(_savedstate.frames);

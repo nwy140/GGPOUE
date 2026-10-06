@@ -101,13 +101,14 @@ GGPOErrorCode Peer2PeerBackend::AddSpectator(char *ip,
 GGPOErrorCode
 Peer2PeerBackend::DoPoll(int timeout)
 {
+   if (!_sync.IsHealthy()) return GGPO_ERRORCODE_GENERAL_FAILURE;
    if (!_sync.InRollback()) {
       _poll.Pump(0);
 
       PollUdpProtocolEvents();
 
       if (!_synchronizing) {
-         _sync.CheckSimulation(timeout);
+         if (!_sync.CheckSimulation(timeout)) return GGPO_ERRORCODE_GENERAL_FAILURE;
 
          // notify all of our endpoints of their local frame number for their
          // next connection quality report
@@ -340,10 +341,11 @@ Peer2PeerBackend::IncrementFrame(void)
 {  
    Log("End of frame (%d)...\n", _sync.GetFrameCount());
    _sync.IncrementFrame();
-   DoPoll(0);
+   if (!_sync.IsHealthy()) return GGPO_ERRORCODE_GENERAL_FAILURE;
+   const auto result = DoPoll(0);
    PollSyncEvents();
 
-   return GGPO_OK;
+   return result;
 }
 
 

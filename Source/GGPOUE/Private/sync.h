@@ -51,13 +51,14 @@ public:
    int GetConfirmedInputs(void *values, int size, int frame);
    int SynchronizeInputs(void *values, int size);
 
-   void CheckSimulation(int timeout);
-   void AdjustSimulation(int seek_to);
+   bool CheckSimulation(int timeout);
+   bool AdjustSimulation(int seek_to);
    void IncrementFrame(void);
 
    int GetFrameCount() { return _framecount; }
    int GetLastConfirmedFrame() const { return _last_confirmed_frame; }
    bool InRollback() { return _rollingback; }
+   bool IsHealthy() const { return _healthy; }
 
    bool GetEvent(Event &e);
 
@@ -76,7 +77,7 @@ protected:
       int head;
    };
 
-   void LoadFrame(int frame);
+   bool LoadFrame(int frame);
    void SaveCurrentFrame();
    int FindSavedFrameIndex(int frame);
    SavedFrame &GetLastSavedFrame();
@@ -91,6 +92,7 @@ protected:
    Config         _config;
 
    bool           _rollingback;
+   bool           _healthy;
    int            _last_confirmed_frame;
    int            _framecount;
    int            _max_prediction_frames;
