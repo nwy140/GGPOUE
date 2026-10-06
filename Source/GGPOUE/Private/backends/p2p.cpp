@@ -70,7 +70,7 @@ Peer2PeerBackend::AddRemotePlayer(char *ip,
     */
    _synchronizing = true;
    
-   _endpoints[queue].Init(&_udp, _poll, queue, ip, port, _local_connect_status);
+   _endpoints[queue].Init(&_udp, _poll, queue, ip, port, _local_connect_status,_callbacks.compatibility_token);
    _endpoints[queue].SetDisconnectTimeout(_disconnect_timeout);
    _endpoints[queue].SetDisconnectNotifyStart(_disconnect_notify_start);
    _endpoints[queue].Synchronize();
@@ -90,7 +90,7 @@ GGPOErrorCode Peer2PeerBackend::AddSpectator(char *ip,
    }
    int queue = _num_spectators++;
 
-   _spectators[queue].Init(&_udp, _poll, queue + 1000, ip, port, _local_connect_status);
+   _spectators[queue].Init(&_udp, _poll, queue + 1000, ip, port, _local_connect_status,_callbacks.compatibility_token);
    _spectators[queue].SetDisconnectTimeout(_disconnect_timeout);
    _spectators[queue].SetDisconnectNotifyStart(_disconnect_notify_start);
    _spectators[queue].Synchronize();
@@ -420,6 +420,12 @@ Peer2PeerBackend::OnUdpProtocolEvent(UdpProtocol::Event &evt, GGPOPlayerHandle h
    GGPOEvent info;
 
    switch (evt.type) {
+   case UdpProtocol::Event::Incompatible:
+      info.code=GGPO_EVENTCODE_INCOMPATIBLE_PEER;info.u.incompatible.player=handle;
+      info.u.incompatible.local_token=evt.u.incompatible.local_token;
+      info.u.incompatible.remote_token=evt.u.incompatible.remote_token;
+      info.u.incompatible.remote_version=evt.u.incompatible.remote_version;
+      _callbacks.on_event(&info);break;
    case UdpProtocol::Event::Connected:
       info.code = GGPO_EVENTCODE_CONNECTED_TO_PEER;
       info.u.connected.player = handle;

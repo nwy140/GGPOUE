@@ -338,6 +338,7 @@ typedef enum {
    GGPO_EVENTCODE_TIMESYNC                     = 1005,
    GGPO_EVENTCODE_CONNECTION_INTERRUPTED       = 1006,
    GGPO_EVENTCODE_CONNECTION_RESUMED           = 1007,
+   GGPO_EVENTCODE_INCOMPATIBLE_PEER             = 1008,
 } GGPOEventCode;
 
 /*
@@ -372,6 +373,12 @@ typedef struct {
       struct {
          GGPOPlayerHandle  player;
       } connection_resumed;
+      struct {
+         GGPOPlayerHandle player;
+         uint64 local_token;
+         uint64 remote_token;
+         uint32 remote_version;
+      } incompatible;
    } u;
 } GGPOEvent;
 
@@ -388,6 +395,9 @@ typedef struct {
  * functions during the game.  All callback functions must be implemented.
  */
 struct GGPOSessionCallbacks {
+    // Compared during every initial UDP sync exchange. Zero is a valid opt-out
+    // application token; wire version validation still applies.
+    uint64 compatibility_token = 0;
     /*
      * begin_game callback - This callback has been deprecated.  You must
      * implement it, but should ignore the 'game' parameter.

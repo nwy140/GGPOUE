@@ -39,6 +39,7 @@ public:
          Disconnected,
          NetworkInterrupted,
          NetworkResumed,
+         Incompatible,
       };
 
       Type      type;
@@ -53,6 +54,7 @@ public:
          struct {
             int         disconnect_timeout;
          } network_interrupted;
+         struct { uint64 local_token; uint64 remote_token; uint32 remote_version; } incompatible;
       } u;
 
       UdpProtocol::Event(Type t = Unknown) : type(t) { }
@@ -65,7 +67,7 @@ public:
    UdpProtocol();
    virtual ~UdpProtocol();
 
-   void Init(Udp *udp, Poll &p, int queue, char *ip, u_short port, UdpMsg::connect_status *status);
+   void Init(Udp *udp, Poll &p, int queue, char *ip, u_short port, UdpMsg::connect_status *status, uint64 compatibility_token=0);
 
    void Synchronize();
    bool GetPeerConnectStatus(int id, int *frame);
@@ -88,6 +90,9 @@ public:
    void SetDisconnectNotifyStart(int timeout);
 
 protected:
+   bool CheckCompatibility(uint32 version,uint64 token);
+   uint64 _compatibility_token=0;
+   bool _compatibility_rejected=false;
    enum State {
       Syncing,
       Synchronzied,

@@ -33,7 +33,7 @@ SpectatorBackend::SpectatorBackend(GGPOSessionCallbacks *cb,
    /*
     * Init the host endpoint
     */
-   _host.Init(&_udp, _poll, 0, hostip, hostport, NULL);
+   _host.Init(&_udp, _poll, 0, hostip, hostport, NULL,_callbacks.compatibility_token);
    _host.Synchronize();
 
    /*
@@ -124,6 +124,12 @@ SpectatorBackend::OnUdpProtocolEvent(UdpProtocol::Event &evt)
    GGPOEvent info;
 
    switch (evt.type) {
+   case UdpProtocol::Event::Incompatible:
+      info.code=GGPO_EVENTCODE_INCOMPATIBLE_PEER;info.u.incompatible.player=0;
+      info.u.incompatible.local_token=evt.u.incompatible.local_token;
+      info.u.incompatible.remote_token=evt.u.incompatible.remote_token;
+      info.u.incompatible.remote_version=evt.u.incompatible.remote_version;
+      _callbacks.on_event(&info);break;
    case UdpProtocol::Event::Connected:
       info.code = GGPO_EVENTCODE_CONNECTED_TO_PEER;
       info.u.connected.player = 0;

@@ -41,10 +41,14 @@ struct UdpMsg
          uint32      random_request;  /* please reply back with this random data */
          uint16      remote_magic;
          uint8       remote_endpoint;
+         uint32      compatibility_version;
+         uint64      compatibility_token;
       } sync_request;
       
       struct {
          uint32      random_reply;    /* OK, here's your random data back */
+         uint32      compatibility_version;
+         uint64      compatibility_token;
       } sync_reply;
       
       struct {

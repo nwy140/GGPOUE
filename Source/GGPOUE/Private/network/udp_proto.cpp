@@ -19,6 +19,7 @@ static const int QUALITY_REPORT_INTERVAL = 1000;
 static const int NETWORK_STATS_INTERVAL  = 1000;
 static const int UDP_SHUTDOWN_TIMER = 5000;
 static const int MAX_SEQ_DISTANCE = (1 << 15);
+static const uint32 COMPATIBILITY_VERSION = 0x52424301;
 
 UdpProtocol::UdpProtocol() :
    _round_trip_time(0),
@@ -69,9 +70,11 @@ UdpProtocol::Init(Udp *udp,
                   int queue,
                   char *ip,
                   u_short port,
-                  UdpMsg::connect_status *status)
+                  UdpMsg::connect_status *status,uint64 compatibility_token)
 {  
    _udp = udp;
+   _compatibility_token=compatibility_token;
+   _compatibility_rejected=false;
    _queue = queue;
    _local_connect_status = status;
 
@@ -276,6 +279,9 @@ UdpProtocol::SendSyncRequest()
    _state.sync.random = rand() & 0xFFFF;
    UdpMsg *msg = new UdpMsg(UdpMsg::SyncRequest);
    msg->u.sync_request.random_request = _state.sync.random;
+   msg->u.sync_request.remote_magic=0;msg->u.sync_request.remote_endpoint=0;
+   msg->u.sync_request.compatibility_version=COMPATIBILITY_VERSION;
+   msg->u.sync_request.compatibility_token=_compatibility_token;
    SendMsg(msg);
 }
 
@@ -309,6 +315,11 @@ UdpProtocol::HandlesMsg(sockaddr_in &from,
 void
 UdpProtocol::OnMsg(UdpMsg *msg, int len)
 {
+   if(len<int(sizeof(msg->hdr)))return;
+   // Old/truncated sync packets cannot complete an unchecked handshake.
+   if((msg->hdr.type==UdpMsg::SyncRequest && len!=int(sizeof(msg->hdr)+sizeof(msg->u.sync_request))) ||
+      (msg->hdr.type==UdpMsg::SyncReply && len!=int(sizeof(msg->hdr)+sizeof(msg->u.sync_reply))))
+   {CheckCompatibility(0,0);return;}
    bool handled = false;
    typedef bool (UdpProtocol::*DispatchFn)(UdpMsg *msg, int len);
    static const DispatchFn table[] = {
@@ -472,6 +483,19 @@ UdpProtocol::OnInvalid(UdpMsg *msg, int len)
 }
 
 bool
+UdpProtocol::CheckCompatibility(uint32 version,uint64 token)
+{
+   if(version==COMPATIBILITY_VERSION && token==_compatibility_token && !_compatibility_rejected)return true;
+   if(!_compatibility_rejected)
+   {
+      Event evt(Event::Incompatible);evt.u.incompatible.local_token=_compatibility_token;
+      evt.u.incompatible.remote_token=token;evt.u.incompatible.remote_version=version;
+      QueueEvent(evt);_compatibility_rejected=true;_current_state=Disconnected;
+   }
+   return false;
+}
+
+bool
 UdpProtocol::OnSyncRequest(UdpMsg *msg, int len)
 {
    if (_remote_magic_number != 0 && msg->hdr.magic != _remote_magic_number) {
@@ -481,13 +505,16 @@ UdpProtocol::OnSyncRequest(UdpMsg *msg, int len)
    }
    UdpMsg *reply = new UdpMsg(UdpMsg::SyncReply);
    reply->u.sync_reply.random_reply = msg->u.sync_request.random_request;
+   reply->u.sync_reply.compatibility_version=COMPATIBILITY_VERSION;
+   reply->u.sync_reply.compatibility_token=_compatibility_token;
    SendMsg(reply);
-   return true;
+   return CheckCompatibility(msg->u.sync_request.compatibility_version,msg->u.sync_request.compatibility_token);
 }
 
 bool
 UdpProtocol::OnSyncReply(UdpMsg *msg, int len)
 {
+   if(!CheckCompatibility(msg->u.sync_reply.compatibility_version,msg->u.sync_reply.compatibility_token))return false;
    if (_current_state != Syncing) {
       ::Log(EGGPOLogVerbosity::Info, "Ignoring SyncReply while not synching.\n");
       return msg->hdr.magic == _remote_magic_number;
