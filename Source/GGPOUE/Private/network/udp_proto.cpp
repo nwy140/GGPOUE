@@ -6,6 +6,7 @@
  */
 
 #include "udp_proto.h"
+#include "input_validation.h"
 #include "../types.h"
 #include "../bitvector.h"
 
@@ -70,10 +71,11 @@ UdpProtocol::Init(Udp *udp,
                   int queue,
                   char *ip,
                   u_short port,
-                  UdpMsg::connect_status *status,uint64 compatibility_token)
+                  UdpMsg::connect_status *status,uint64 compatibility_token,int expected_input_size)
 {  
    _udp = udp;
    _compatibility_token=compatibility_token;
+   _expected_input_size=expected_input_size;
    _compatibility_rejected=false;
    _queue = queue;
    _local_connect_status = status;
@@ -106,6 +108,10 @@ UdpProtocol::SendInput(GameInput &input)
           * (better, but still ug).  For the meantime, make this queue really big to decrease
           * the odds of this happening...
           */
+         if(IsPendingFull()) {
+            if(!_disconnect_event_sent){QueueEvent(Event(Event::Disconnected));_disconnect_event_sent=true;}
+            _current_state=Disconnected;return;
+         }
          _pending_output.push(input);
       }
       SendPendingOutput();
@@ -316,6 +322,14 @@ void
 UdpProtocol::OnMsg(UdpMsg *msg, int len)
 {
    if(len<int(sizeof(msg->hdr)))return;
+   if(msg->hdr.type<UdpMsg::SyncRequest || msg->hdr.type>UdpMsg::InputAck)return;
+   // Validate packet bounds before dispatch reads any union fields.
+   if(msg->hdr.type==UdpMsg::Input) {
+      const int prefix=int((char*)msg->u.input.bits-(char*)msg);
+      if(len<prefix || msg->u.input.num_bits>sizeof(msg->u.input.bits)*8 ||
+         len!=prefix+(msg->u.input.num_bits+7)/8)return;
+   } else if(msg->hdr.type>=UdpMsg::QualityReport && msg->hdr.type<=UdpMsg::InputAck && len!=msg->PacketSize())return;
+
    // Old/truncated sync packets cannot complete an unchecked handshake.
    if((msg->hdr.type==UdpMsg::SyncRequest && len!=int(sizeof(msg->hdr)+sizeof(msg->u.sync_request))) ||
       (msg->hdr.type==UdpMsg::SyncReply && len!=int(sizeof(msg->hdr)+sizeof(msg->u.sync_reply))))
@@ -551,6 +565,22 @@ UdpProtocol::OnSyncReply(UdpMsg *msg, int len)
 bool
 UdpProtocol::OnInput(UdpMsg *msg, int len)
 {
+   // This fork encodes each frame as {more, on, button:9} terminated by more=0.
+   // Walk the complete stream before mutating the endpoint or its input buffer.
+   if(msg->u.input.num_bits) {
+      if((_expected_input_size && msg->u.input.input_size!=_expected_input_size) || msg->u.input.input_size==0 || msg->u.input.input_size>sizeof(_last_received_input.bits) ||
+         msg->u.input.start_frame>uint32(INT_MAX-1))return false;
+      int frames=0;
+      if(!GGPOInputEncodingValid(msg->u.input.bits,msg->u.input.num_bits,msg->u.input.input_size,msg->u.input.start_frame,&frames))return false;
+      const int64 skipped=_last_received_input.frame<0?0:MAX(int64(0),MIN(int64(frames),int64(_last_received_input.frame)-msg->u.input.start_frame+1));
+      if(int64(frames)-skipped>UDP_BUFFER_SIZE-3-_event_queue.size())return false;
+      if(_last_received_input.frame>=0 && msg->u.input.start_frame>uint32(_last_received_input.frame+1)) {
+         _current_state=Disconnected;
+         if(!_disconnect_event_sent){QueueEvent(Event(Event::Disconnected));_disconnect_event_sent=true;}
+         return true;
+      }
+   }
+
    /*
     * If a disconnect is requested, go ahead and disconnect now.
     */
@@ -568,7 +598,7 @@ UdpProtocol::OnInput(UdpMsg *msg, int len)
        */
       UdpMsg::connect_status* remote_status = msg->u.input.peer_connect_status;
       for (int i = 0; i < ARRAY_SIZE(_peer_connect_status); i++) {
-         ASSERT(remote_status[i].last_frame >= _peer_connect_status[i].last_frame);
+         // Reordered packets may report an older acknowledged frame.
          _peer_connect_status[i].disconnected = _peer_connect_status[i].disconnected || remote_status[i].disconnected;
          _peer_connect_status[i].last_frame = MAX(_peer_connect_status[i].last_frame, remote_status[i].last_frame);
       }

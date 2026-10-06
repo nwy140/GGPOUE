@@ -64,10 +64,11 @@ public:
    virtual bool OnLoopPoll(void *cookie);
 
 public:
+   int _expected_input_size=0;
    UdpProtocol();
    virtual ~UdpProtocol();
 
-   void Init(Udp *udp, Poll &p, int queue, char *ip, u_short port, UdpMsg::connect_status *status, uint64 compatibility_token=0);
+   void Init(Udp *udp, Poll &p, int queue, char *ip, u_short port, UdpMsg::connect_status *status, uint64 compatibility_token=0,int expected_input_size=0);
 
    void Synchronize();
    bool GetPeerConnectStatus(int id, int *frame);

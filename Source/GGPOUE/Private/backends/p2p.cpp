@@ -70,7 +70,7 @@ Peer2PeerBackend::AddRemotePlayer(char *ip,
     */
    _synchronizing = true;
    
-   _endpoints[queue].Init(&_udp, _poll, queue, ip, port, _local_connect_status,_callbacks.compatibility_token);
+   _endpoints[queue].Init(&_udp, _poll, queue, ip, port, _local_connect_status,_callbacks.compatibility_token,_input_size);
    _endpoints[queue].SetDisconnectTimeout(_disconnect_timeout);
    _endpoints[queue].SetDisconnectNotifyStart(_disconnect_notify_start);
    _endpoints[queue].Synchronize();
@@ -90,7 +90,7 @@ GGPOErrorCode Peer2PeerBackend::AddSpectator(char *ip,
    }
    int queue = _num_spectators++;
 
-   _spectators[queue].Init(&_udp, _poll, queue + 1000, ip, port, _local_connect_status,_callbacks.compatibility_token);
+   _spectators[queue].Init(&_udp, _poll, queue + 1000, ip, port, _local_connect_status,_callbacks.compatibility_token,_input_size*_num_players);
    _spectators[queue].SetDisconnectTimeout(_disconnect_timeout);
    _spectators[queue].SetDisconnectNotifyStart(_disconnect_notify_start);
    _spectators[queue].Synchronize();
