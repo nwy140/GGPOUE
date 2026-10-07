@@ -6,6 +6,7 @@
  */
 
 #include "udp.h"
+#include "udp_msg.h"
 #include "../types.h"
 
 SOCKET
@@ -37,89 +38,71 @@ CreateSocket(uint16 bind_port, int retries)
    return INVALID_SOCKET;
 }
 
-Udp::Udp() :
-   _socket(INVALID_SOCKET),
-   _callbacks(NULL)
-{
-}
-
-Udp::~Udp(void)
-{
-   if (_socket != INVALID_SOCKET) {
-      closesocket(_socket);
-      _socket = INVALID_SOCKET;
+// The packet protocol never sees these addresses; only this UDP backend does.
+class UDPConnectionManager final : public ConnectionManager {
+   SOCKET _socket;
+   TArray<sockaddr_in> _peers;
+public:
+   explicit UDPConnectionManager(uint16 port) : _socket(CreateSocket(port, 0)) {}
+   ~UDPConnectionManager() override { if (_socket != INVALID_SOCKET) closesocket(_socket); }
+   bool IsReady() const override { return _socket != INVALID_SOCKET; }
+   bool HasConnection(int id) const override { return _peers.IsValidIndex(id); }
+   int AddUDPConnection(const char* ip, unsigned short port) override {
+      sockaddr_in address = {};
+      address.sin_family = AF_INET;
+      address.sin_port = htons(port);
+      if (!ip || port == 0 || inet_pton(AF_INET, ip, &address.sin_addr.s_addr) != 1) return -1;
+      for (int i = 0; i < _peers.Num(); ++i)
+         if (_peers[i].sin_addr.s_addr == address.sin_addr.s_addr && _peers[i].sin_port == address.sin_port) return i;
+      if (_peers.Num() >= MAX_UDP_ENDPOINTS) return -1;
+      return _peers.Add(address);
    }
-}
-
-void
-Udp::Init(uint16 port, Poll *poll, Callbacks *callbacks)
-{
-   _callbacks = callbacks;
-
-   _poll = poll;
-   _poll->RegisterLoop(this);
-
-   Log(EGGPOLogVerbosity::Info, "binding udp socket to port %d.\n", port);
-   _socket = CreateSocket(port, 0);
-}
-
-void
-Udp::SendTo(char *buffer, int len, int flags, struct sockaddr *dst, int destlen)
-{
-   struct sockaddr_in *to = (struct sockaddr_in *)dst;
-
-   int res = sendto(_socket, buffer, len, flags, dst, destlen);
-   if (res == SOCKET_ERROR) {
-      DWORD err = WSAGetLastError();
-      Log(EGGPOLogVerbosity::Info, "unknown error in sendto (erro: %d  wsaerr: %d).\n", res, err);
-      ASSERT(false && "Unknown error in sendto");
+   int SendTo(const char* buffer, int len, int flags, int id) override {
+      if (!IsReady() || !HasConnection(id) || !buffer || len <= 0 || len > MAX_UDP_PACKET_SIZE) return -1;
+      return sendto(_socket, buffer, len, flags, (sockaddr*)&_peers[id], sizeof(sockaddr_in));
    }
-   char dst_ip[1024];
-   Log(EGGPOLogVerbosity::VeryVerbose, "sent packet length %d to %s:%d (ret:%d).\n", len, inet_ntop(AF_INET, (void *)&to->sin_addr, dst_ip, ARRAY_SIZE(dst_ip)), ntohs(to->sin_port), res);
-}
-
-bool
-Udp::OnLoopPoll(void *cookie)
-{
-   uint8          recv_buf[MAX_UDP_PACKET_SIZE];
-   sockaddr_in    recv_addr;
-   int            recv_addr_len;
-
-   for (;;) {
-      recv_addr_len = sizeof(recv_addr);
-      int len = recvfrom(_socket, (char *)recv_buf, MAX_UDP_PACKET_SIZE, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
-
-      // TODO: handle len == 0... indicates a disconnect.
-
-      if (len == -1) {
-         int error = WSAGetLastError();
-         if (error != WSAEWOULDBLOCK) {
-            Log(EGGPOLogVerbosity::VeryVerbose, "recvfrom WSAGetLastError returned %d (%x).\n", error, error);
+   int RecvFrom(char* buffer, int capacity, int flags, int* id) override {
+      *id = -1;
+      if (!IsReady()) return -1;
+      sockaddr_in from = {};
+      int address_len = sizeof(from);
+      int len = recvfrom(_socket, buffer, capacity, flags, (sockaddr*)&from, &address_len);
+      if (len == SOCKET_ERROR) return WSAGetLastError() == WSAEMSGSIZE ? -2 : -1;
+      if (len == 0) return -2;
+      for (int i = 0; i < _peers.Num(); ++i) {
+         if (_peers[i].sin_addr.s_addr == from.sin_addr.s_addr && _peers[i].sin_port == from.sin_port) {
+            *id = i;
+            return len;
          }
-         break;
-      } else if (len > 0) {
-         char src_ip[1024];
-         Log(EGGPOLogVerbosity::VeryVerbose, "recvfrom returned (len:%d  from:%s:%d).\n", len, inet_ntop(AF_INET, (void*)&recv_addr.sin_addr, src_ip, ARRAY_SIZE(src_ip)), ntohs(recv_addr.sin_port) );
-         UdpMsg *msg = (UdpMsg *)recv_buf;
-         _callbacks->OnMsg(recv_addr, msg, len);
-      } 
+      }
+      return -2;
+   }
+};
+
+Udp::Udp() : _callbacks(nullptr), _poll(nullptr) {}
+Udp::~Udp() = default;
+void Udp::Init(uint16 port, Poll* poll, Callbacks* callbacks, ConnectionManager* manager) {
+   _callbacks = callbacks;
+   _poll = poll;
+   if (manager) _manager = manager;
+   else {
+      _owned_manager.reset(new UDPConnectionManager(port));
+      _manager = _owned_manager.get();
+   }
+   _poll->RegisterLoop(this);
+}
+void Udp::SendTo(char* buffer, int len, int flags, int id) {
+   _manager->SendTo(buffer, len, flags, id);
+}
+bool Udp::OnLoopPoll(void* cookie) {
+   alignas(UdpMsg) uint8 recv_buf[MAX_UDP_PACKET_SIZE];
+   // Bound per-poll work even if a backend or unknown sender floods the queue.
+   for (int packet = 0; packet < 256; ++packet) {
+      int id = -1;
+      int len = _manager->RecvFrom((char*)recv_buf, sizeof(recv_buf), 0, &id);
+      if (len == -1) break;
+      if (len <= 0 || len > MAX_UDP_PACKET_SIZE || !HasConnection(id)) continue;
+      _callbacks->OnMsg(id, (UdpMsg*)recv_buf, len);
    }
    return true;
-}
-
-
-void
-Udp::Log(EGGPOLogVerbosity Verbosity, const char *fmt, ...)
-{
-   char buf[1024];
-   size_t offset;
-   va_list args;
-
-   strcpy_s(buf, "udp | ");
-   offset = strlen(buf);
-   va_start(args, fmt);
-   vsnprintf(buf + offset, ARRAY_SIZE(buf) - offset - 1, fmt, args);
-   buf[ARRAY_SIZE(buf)-1] = '\0';
-   ::Log(Verbosity, "%s", buf);
-   va_end(args);
 }

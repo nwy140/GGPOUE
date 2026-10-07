@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <functional>
 #include "../../Private/log.h"
+#include "connection_manager.h"
 #include "ggponet.generated.h"
 
 UENUM(BlueprintType)
@@ -268,6 +269,7 @@ typedef struct GGPOPlayer {
          unsigned short port;
       } remote;
    } u;
+   int connection_id = -1; // Used only by external-transport sessions.
 } GGPOPlayer;
 
 typedef struct GGPOLocalEndpoint {
@@ -551,6 +553,11 @@ public:
         int input_size,
         unsigned short localport);
 
+    // Borrowed transport must outlive the session. Remote players use connection_id.
+    static GGPO_API GGPOErrorCode __cdecl ggpo_start_session(GGPOSession** session,
+        GGPOSessionCallbacks* cb, ConnectionManager* manager, const char* game,
+        int num_players, int input_size);
+
 
     /*
      * ggpo_add_player --
@@ -632,6 +639,9 @@ public:
         unsigned short local_port,
         char* host_ip,
         unsigned short host_port);
+    static GGPO_API GGPOErrorCode __cdecl ggpo_start_spectating(GGPOSession** session,
+        GGPOSessionCallbacks* cb, ConnectionManager* manager, const char* game,
+        int num_players, int input_size, int host_connection_id);
 
     /*
      * ggpo_close_session --

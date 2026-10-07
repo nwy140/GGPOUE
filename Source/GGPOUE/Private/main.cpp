@@ -229,3 +229,27 @@ GGPOErrorCode GGPONet::ggpo_start_spectating(GGPOSession **session,
    return GGPO_OK;
 }
 
+
+// External transport entry points preserve the existing raw UDP public API.
+GGPOErrorCode GGPONet::ggpo_start_session(GGPOSession** session,
+   GGPOSessionCallbacks* cb, ConnectionManager* manager, const char* game,
+   int num_players, int input_size) {
+   if (!session) return GGPO_ERRORCODE_INVALID_REQUEST;
+   *session = nullptr;
+   if (!cb || !manager || !manager->IsReady() || !game || num_players < 1 ||
+       num_players > GGPO_MAX_PLAYERS || input_size < 1 || input_size > GAMEINPUT_MAX_BYTES)
+      return GGPO_ERRORCODE_INVALID_REQUEST;
+   *session = new Peer2PeerBackend(cb, game, 0, num_players, input_size, manager);
+   return GGPO_OK;
+}
+GGPOErrorCode GGPONet::ggpo_start_spectating(GGPOSession** session,
+   GGPOSessionCallbacks* cb, ConnectionManager* manager, const char* game,
+   int num_players, int input_size, int host_connection_id) {
+   if (!session) return GGPO_ERRORCODE_INVALID_REQUEST;
+   *session = nullptr;
+   if (!cb || !manager || !manager->IsReady() || !manager->HasConnection(host_connection_id) ||
+       !game || num_players < 1 || num_players > GGPO_MAX_PLAYERS || input_size < 1 ||
+       input_size > sizeof(GameInput::bits) / num_players) return GGPO_ERRORCODE_INVALID_REQUEST;
+   *session = new SpectatorBackend(cb, game, 0, num_players, input_size, nullptr, 0, manager, host_connection_id);
+   return GGPO_OK;
+}

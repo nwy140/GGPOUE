@@ -68,7 +68,7 @@ public:
    UdpProtocol();
    virtual ~UdpProtocol();
 
-   void Init(Udp *udp, Poll &p, int queue, char *ip, u_short port, UdpMsg::connect_status *status, uint64 compatibility_token=0,int expected_input_size=0);
+   void Init(Udp *udp, Poll &p, int queue, int connection_id, UdpMsg::connect_status *status, uint64 compatibility_token=0,int expected_input_size=0);
 
    void Synchronize();
    bool GetPeerConnectStatus(int id, int *frame);
@@ -78,7 +78,7 @@ public:
    void SendInput(GameInput &input);
    void SendInputAck();
    bool IsPendingFull();
-   bool HandlesMsg(sockaddr_in &from, UdpMsg *msg);
+   bool HandlesMsg(int from, UdpMsg *msg);
    void OnMsg(UdpMsg *msg, int len);
    void Disconnect();
   
@@ -102,11 +102,11 @@ protected:
    };
    struct QueueEntry {
       int         queue_time;
-      sockaddr_in dest_addr;
+      int connection_id;
       UdpMsg      *msg;
 
       QueueEntry() {}
-      QueueEntry(int time, sockaddr_in &dst, UdpMsg *m) : queue_time(time), dest_addr(dst), msg(m) { }
+      QueueEntry(int time, int dst, UdpMsg *m) : queue_time(time), connection_id(dst), msg(m) { }
    };
 
    bool CreateSocket(int retries);
@@ -135,7 +135,7 @@ protected:
     * Network transmission information
     */
    Udp            *_udp;
-   sockaddr_in    _peer_addr; 
+   int            _connection_id = -1;
    uint16         _magic_number;
    int            _queue;
    uint16         _remote_magic_number;
@@ -144,7 +144,7 @@ protected:
    int            _oop_percent;
    struct {
       int         send_time;
-      sockaddr_in dest_addr;
+      int connection_id;
       UdpMsg*     msg;
    }              _oo_packet;
    RingBuffer<QueueEntry, UDP_BUFFER_SIZE> _send_queue;

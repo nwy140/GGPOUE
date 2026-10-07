@@ -16,7 +16,7 @@
 
 class Peer2PeerBackend : public IQuarkBackend, IPollSink, Udp::Callbacks {
 public:
-   Peer2PeerBackend(GGPOSessionCallbacks *cb, const char *gamename, uint16 localport, int num_players, int input_size);
+   Peer2PeerBackend(GGPOSessionCallbacks *cb, const char *gamename, uint16 localport, int num_players, int input_size, ConnectionManager* manager = nullptr);
    virtual ~Peer2PeerBackend();
 
 
@@ -35,7 +35,7 @@ public:
    virtual GGPOErrorCode TrySynchronizeLocal();
 
 public:
-   virtual void OnMsg(sockaddr_in &from, UdpMsg *msg, int len);
+   virtual void OnMsg(int from, UdpMsg *msg, int len);
 
 protected:
    GGPOErrorCode PlayerHandleToQueue(GGPOPlayerHandle player, int *queue);
@@ -48,14 +48,15 @@ protected:
    void CheckInitialSync(void);
    int Poll2Players(int current_frame);
    int PollNPlayers(int current_frame);
-   void AddRemotePlayer(char *remoteip, uint16 reportport, int queue);
-   GGPOErrorCode AddSpectator(char *remoteip, uint16 reportport);
+   void AddRemotePlayer(int connection_id, int queue);
+   GGPOErrorCode AddSpectator(int connection_id);
    virtual void OnSyncEvent(Sync::Event &e) { }
    virtual void OnUdpProtocolEvent(UdpProtocol::Event &e, GGPOPlayerHandle handle);
    virtual void OnUdpProtocolPeerEvent(UdpProtocol::Event &e, int queue);
    virtual void OnUdpProtocolSpectatorEvent(UdpProtocol::Event &e, int queue);
 
 protected:
+   bool _external_transport = false;
    GGPOSessionCallbacks  _callbacks;
    Poll                  _poll;
    Sync                  _sync;

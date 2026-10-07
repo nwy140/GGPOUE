@@ -19,7 +19,7 @@
 
 class SpectatorBackend : public IQuarkBackend, IPollSink, Udp::Callbacks {
 public:
-   SpectatorBackend(GGPOSessionCallbacks *cb, const char *gamename, uint16 localport, int num_players, int input_size, char *hostip, u_short hostport);
+   SpectatorBackend(GGPOSessionCallbacks *cb, const char *gamename, uint16 localport, int num_players, int input_size, char *hostip, u_short hostport, ConnectionManager* manager = nullptr, int host_id = -1);
    virtual ~SpectatorBackend();
 
 
@@ -37,7 +37,7 @@ public:
    virtual GGPOErrorCode TrySynchronizeLocal() { return GGPO_ERRORCODE_UNSUPPORTED; }
 
 public:
-   virtual void OnMsg(sockaddr_in &from, UdpMsg *msg, int len);
+   virtual void OnMsg(int from, UdpMsg *msg, int len);
 
 protected:
    void PollUdpProtocolEvents(void);
