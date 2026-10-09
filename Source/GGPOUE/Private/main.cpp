@@ -86,6 +86,10 @@ GGPONet::ggpo_start_synctest(GGPOSession **ggpo,
 }
 
 GGPOErrorCode
+GGPONet::ggpo_set_prediction_window(GGPOSession *ggpo, int frames)
+{ return ggpo ? ggpo->SetPredictionWindow(frames) : GGPO_ERRORCODE_INVALID_SESSION; }
+
+GGPOErrorCode
 GGPONet::ggpo_set_frame_delay(GGPOSession *ggpo,
                      GGPOPlayerHandle player,
                      int frame_delay)

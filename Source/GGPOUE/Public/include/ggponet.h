@@ -657,6 +657,8 @@ public:
      * Change the amount of frames ggpo will delay local input.  Must be called
      * before the first call to ggpo_synchronize_input.
      */
+    // Before the first simulated frame; 1..32, default 8. Does not alter wire inputs.
+    static GGPO_API GGPOErrorCode __cdecl ggpo_set_prediction_window(GGPOSession*, int frames);
     static GGPO_API GGPOErrorCode __cdecl ggpo_set_frame_delay(GGPOSession*,
         GGPOPlayerHandle player,
         int frame_delay);

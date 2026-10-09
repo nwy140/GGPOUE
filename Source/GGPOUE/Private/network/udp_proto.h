@@ -15,6 +15,7 @@
 #include "../timesync.h"
 #include "include/ggponet.h"
 #include "../ring_buffer.h"
+#include "input_repair.h"
 
 #define UDP_BUFFER_SIZE BUFFER_SIZE
 
@@ -190,6 +191,7 @@ protected:
    GameInput                  _last_received_input;
    GameInput                  _last_sent_input;
    GameInput                  _last_acked_input;
+   unsigned int               _last_sync_request_time=0;
    unsigned int               _last_send_time;
    unsigned int               _last_recv_time;
    unsigned int               _shutdown_timeout;
@@ -205,6 +207,7 @@ protected:
     * Rift synchronization.
     */
    TimeSync                   _timesync;
+   sf4e::netplay::InputRepair  _input_repair;
 
    /*
     * Event queue

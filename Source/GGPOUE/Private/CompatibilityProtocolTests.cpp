@@ -10,7 +10,7 @@ bool FGGPOCompatibilityWireTest::RunTest(const FString&)
     {
         UdpProtocol Protocol;UdpMsg Message(UdpMsg::SyncReply);
         FMemory::Memzero(&Message,sizeof(Message));Message.hdr.type=UdpMsg::SyncReply;
-        Message.u.sync_reply.compatibility_version=Case==1?0x52424302:0x52424301;
+        Message.u.sync_reply.compatibility_version=Case==1?0x52424301:0x52424302;
         Message.u.sync_reply.compatibility_token=Case==2?123:0;
         const int32 Length=Case==0?int32(sizeof(Message.hdr)+sizeof(uint32)):Message.PacketSize();
         Protocol.OnMsg(&Message,Length);UdpProtocol::Event Event;

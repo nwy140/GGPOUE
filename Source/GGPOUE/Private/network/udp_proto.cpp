@@ -16,11 +16,11 @@ static const int SYNC_RETRY_INTERVAL = 2000;
 static const int SYNC_FIRST_RETRY_INTERVAL = 500;
 static const int RUNNING_RETRY_INTERVAL = 200;
 static const int KEEP_ALIVE_INTERVAL    = 200;
-static const int QUALITY_REPORT_INTERVAL = 1000;
+static const int QUALITY_REPORT_INTERVAL = 100;
 static const int NETWORK_STATS_INTERVAL  = 1000;
 static const int UDP_SHUTDOWN_TIMER = 5000;
 static const int MAX_SEQ_DISTANCE = (1 << 15);
-static const uint32 COMPATIBILITY_VERSION = 0x52424301;
+static const uint32 COMPATIBILITY_VERSION = 0x52424302;
 
 UdpProtocol::UdpProtocol() :
    _round_trip_time(0),
@@ -55,6 +55,7 @@ UdpProtocol::UdpProtocol() :
    }
 
    _oo_packet.msg = NULL;
+   _input_repair.SetEnabled(true);
 
    _send_latency = Platform::GetConfigInt("ggpo.network.delay");
    _oop_percent = Platform::GetConfigInt("ggpo.oop.percent");
@@ -119,51 +120,50 @@ void
 UdpProtocol::SendPendingOutput()
 {
    UdpMsg *msg = new UdpMsg(UdpMsg::Input);
-   int i, j, offset = 0;
-   uint8 *bits;
-   GameInput last;
-
+   const int prefix = int((char*)msg->u.input.bits-(char*)msg);
+   const int max_bits = (4096-prefix)*8; // Both native and Steam transports accept 4096-byte GGPO datagrams.
+   int offset=0;
    if (_pending_output.size()) {
-      last = _last_acked_input;
-      bits = msg->u.input.bits;
-
-      msg->u.input.start_frame = _pending_output.front().frame;
-      msg->u.input.input_size = (uint8)_pending_output.front().size;
-
-      ASSERT(last.frame == -1 || last.frame + 1 == msg->u.input.start_frame);
-      for (j = 0; j < _pending_output.size(); j++) {
-         GameInput &current = _pending_output.item(j);
-         if (memcmp(current.bits, last.bits, current.size) != 0) {
-            ASSERT((GAMEINPUT_MAX_BYTES * GAMEINPUT_MAX_PLAYERS * 8) < (1 << BITVECTOR_NIBBLE_SIZE));
-            for (i = 0; i < current.size * 8; i++) {
-               ASSERT(i < (1 << BITVECTOR_NIBBLE_SIZE));
-               if (current.value(i) != last.value(i)) {
-                  BitVector_SetBit(msg->u.input.bits, &offset);
-                  (current.value(i) ? BitVector_SetBit : BitVector_ClearBit)(bits, &offset);
-                  BitVector_WriteNibblet(bits, i, &offset);
-               }
-            }
-         }
-         BitVector_ClearBit(msg->u.input.bits, &offset);
-         last = _last_sent_input = current;
+      GameInput last=_last_acked_input;
+      const int size=_pending_output.front().size;
+      msg->u.input.start_frame=_pending_output.front().frame;
+      msg->u.input.input_size=uint8(size);
+      ASSERT(last.frame==-1 || last.frame+1==msg->u.input.start_frame);
+      // Price the entire history before writing. Raw frames bound worst-case
+      // bandwidth when rapidly changing inputs make delta encoding expand.
+      int delta_bits=0;
+      for(int j=0;j<_pending_output.size();++j) {
+         const GameInput& current=_pending_output.item(j);
+         for(int i=0;i<size*8;++i)if(current.value(i)!=last.value(i))delta_bits+=2+BITVECTOR_NIBBLE_SIZE;
+         ++delta_bits;last=current;
       }
-   } else {
-      msg->u.input.start_frame = 0;
-      msg->u.input.input_size = 0;
-   }
-   msg->u.input.ack_frame = _last_received_input.frame;
-   msg->u.input.num_bits = (uint16)offset;
-
-   msg->u.input.disconnect_requested = _current_state == Disconnected;
-   if (_local_connect_status) {
-      memcpy(msg->u.input.peer_connect_status, _local_connect_status, sizeof(UdpMsg::connect_status) * UDP_MSG_MAX_PLAYERS);
-   } else {
-      memset(msg->u.input.peer_connect_status, 0, sizeof(UdpMsg::connect_status) * UDP_MSG_MAX_PLAYERS);
-   }
-
-   ASSERT(offset < MAX_COMPRESSED_BITS);
-
+      const bool raw=delta_bits>_pending_output.size()*size*8;
+      if(raw)msg->u.input.input_size|=0x80;
+      last=_last_acked_input;
+      for(int j=0;j<_pending_output.size();++j) {
+         const GameInput& current=_pending_output.item(j);
+         int frame_bits=raw?size*8:1;
+         if(!raw)for(int i=0;i<size*8;++i)if(current.value(i)!=last.value(i))frame_bits+=2+BITVECTOR_NIBBLE_SIZE;
+         if(offset+frame_bits>max_bits)break; // Keep the unsent suffix for the next acknowledgement/retry.
+         if(raw){memcpy(msg->u.input.bits+offset/8,current.bits,size);offset+=frame_bits;}
+         else {
+            for(int i=0;i<size*8;++i)if(current.value(i)!=last.value(i)) {
+               BitVector_SetBit(msg->u.input.bits,&offset);
+               (current.value(i)?BitVector_SetBit:BitVector_ClearBit)(msg->u.input.bits,&offset);
+               BitVector_WriteNibblet(msg->u.input.bits,i,&offset);
+            }
+            BitVector_ClearBit(msg->u.input.bits,&offset);
+         }
+         last=_last_sent_input=current;
+      }
+   } else {msg->u.input.start_frame=0;msg->u.input.input_size=0;}
+   msg->u.input.ack_frame=_last_received_input.frame;
+   msg->u.input.num_bits=uint16(offset);
+   msg->u.input.disconnect_requested=_current_state==Disconnected;
+   if(_local_connect_status)memcpy(msg->u.input.peer_connect_status,_local_connect_status,sizeof(UdpMsg::connect_status)*UDP_MSG_MAX_PLAYERS);
+   else memset(msg->u.input.peer_connect_status,0,sizeof(UdpMsg::connect_status)*UDP_MSG_MAX_PLAYERS);
    SendMsg(msg);
+   _input_repair.OnInputSent(Platform::GetCurrentTimeMS(),_last_sent_input.frame);
 }
 
 void
@@ -206,7 +206,7 @@ UdpProtocol::OnLoopPoll(void *cookie)
    switch (_current_state) {
    case Syncing:
       next_interval = (_state.sync.roundtrips_remaining == NUM_SYNC_PACKETS) ? SYNC_FIRST_RETRY_INTERVAL : SYNC_RETRY_INTERVAL;
-      if (_last_send_time && _last_send_time + next_interval < now) {
+      if (now - _last_sync_request_time >= next_interval) {
          Log("No luck syncing after %d ms... Re-queueing sync packet.\n", next_interval);
          SendSyncRequest();
       }
@@ -218,6 +218,11 @@ UdpProtocol::OnLoopPoll(void *cookie)
          Log("Haven't exchanged packets in a while (last received:%d  last sent:%d).  Resending.\n", _last_received_input.frame, _last_sent_input.frame);
          SendPendingOutput();
          _state.running.last_input_packet_recv_time = now;
+      } else if(_queue>=0 && _queue<UDP_MSG_MAX_PLAYERS && !_disconnect_event_sent &&
+                _input_repair.TryRepair(now,_send_queue.empty() && !_oo_packet.msg)) {
+         // Regenerate the latest unacknowledged history, sequence number and ACK.
+         // Never resend an old transport envelope or schedule simulation work.
+         SendPendingOutput();
       }
 
       if (!_state.running.last_quality_report_time || _state.running.last_quality_report_time + QUALITY_REPORT_INTERVAL < now) {
@@ -279,7 +284,7 @@ UdpProtocol::Disconnect()
 void
 UdpProtocol::SendSyncRequest()
 {
-   _state.sync.random = rand() & 0xFFFF;
+   _last_sync_request_time = Platform::GetCurrentTimeMS();
    UdpMsg *msg = new UdpMsg(UdpMsg::SyncRequest);
    msg->u.sync_request.random_request = _state.sync.random;
    msg->u.sync_request.remote_magic=0;msg->u.sync_request.remote_endpoint=0;
@@ -416,6 +421,7 @@ UdpProtocol::Synchronize()
    if (_udp) {
       _current_state = Syncing;
       _state.sync.roundtrips_remaining = NUM_SYNC_PACKETS;
+      _state.sync.random = rand() & 0xFFFF;
       SendSyncRequest();
    }
 }
@@ -553,6 +559,7 @@ UdpProtocol::OnSyncReply(UdpMsg *msg, int len)
       evt.u.synchronizing.total = NUM_SYNC_PACKETS;
       evt.u.synchronizing.count = NUM_SYNC_PACKETS - _state.sync.roundtrips_remaining;
       QueueEvent(evt);
+      _state.sync.random = (_state.sync.random + 1) & 0xFFFF;
       SendSyncRequest();
    }
    return true;
@@ -561,13 +568,19 @@ UdpProtocol::OnSyncReply(UdpMsg *msg, int len)
 bool
 UdpProtocol::OnInput(UdpMsg *msg, int len)
 {
+   const bool raw=(msg->u.input.input_size & 0x80)!=0;
+   const int input_size=msg->u.input.input_size & 0x7f;
    // This fork encodes each frame as {more, on, button:9} terminated by more=0.
    // Walk the complete stream before mutating the endpoint or its input buffer.
    if(msg->u.input.num_bits) {
-      if((_expected_input_size && msg->u.input.input_size!=_expected_input_size) || msg->u.input.input_size==0 || msg->u.input.input_size>sizeof(_last_received_input.bits) ||
+      if((_expected_input_size && input_size!=_expected_input_size) || input_size==0 || input_size>sizeof(_last_received_input.bits) ||
          msg->u.input.start_frame>uint32(INT_MAX-1))return false;
       int frames=0;
-      if(!GGPOInputEncodingValid(msg->u.input.bits,msg->u.input.num_bits,msg->u.input.input_size,msg->u.input.start_frame,&frames))return false;
+      if(raw) {
+         if(msg->u.input.num_bits%(input_size*8)!=0)return false;
+         frames=msg->u.input.num_bits/(input_size*8);
+         if(int64(msg->u.input.start_frame)+frames>INT_MAX)return false;
+      } else if(!GGPOInputEncodingValid(msg->u.input.bits,msg->u.input.num_bits,input_size,msg->u.input.start_frame,&frames))return false;
       const int64 skipped=_last_received_input.frame<0?0:MAX(int64(0),MIN(int64(frames),int64(_last_received_input.frame)-msg->u.input.start_frame+1));
       if(int64(frames)-skipped>UDP_BUFFER_SIZE-3-_event_queue.size())return false;
       if(_last_received_input.frame>=0 && msg->u.input.start_frame>uint32(_last_received_input.frame+1)) {
@@ -610,7 +623,7 @@ UdpProtocol::OnInput(UdpMsg *msg, int len)
       int numBits = msg->u.input.num_bits;
       int currentFrame = msg->u.input.start_frame;
 
-      _last_received_input.size = msg->u.input.input_size;
+      _last_received_input.size = input_size;
       if (_last_received_input.frame < 0) {
          _last_received_input.frame = msg->u.input.start_frame - 1;
       }
@@ -622,7 +635,10 @@ UdpProtocol::OnInput(UdpMsg *msg, int len)
          ASSERT(currentFrame <= (_last_received_input.frame + 1));
          bool useInputs = currentFrame == _last_received_input.frame + 1;
 
-         while (BitVector_ReadBit(bits, &offset)) {
+         if(raw) {
+            if(useInputs)memcpy(_last_received_input.bits,bits+offset/8,input_size);
+            offset+=input_size*8;
+         } else while (BitVector_ReadBit(bits, &offset)) {
             int on = BitVector_ReadBit(bits, &offset);
             int button = BitVector_ReadNibblet(bits, &offset);
             if (useInputs) {
@@ -675,6 +691,7 @@ UdpProtocol::OnInput(UdpMsg *msg, int len)
    /*
     * Get rid of our buffered input
     */
+   _input_repair.OnAck(msg->u.input.ack_frame);
    while (_pending_output.size() && _pending_output.front().frame < msg->u.input.ack_frame) {
       Log("Throwing away pending output frame %d\n", _pending_output.front().frame);
       _last_acked_input = _pending_output.front();
@@ -690,6 +707,7 @@ UdpProtocol::OnInputAck(UdpMsg *msg, int len)
    /*
     * Get rid of our buffered input
     */
+   _input_repair.OnAck(msg->u.input_ack.ack_frame);
    while (_pending_output.size() && _pending_output.front().frame < msg->u.input_ack.ack_frame) {
       Log("Throwing away pending output frame %d\n", _pending_output.front().frame);
       _last_acked_input = _pending_output.front();

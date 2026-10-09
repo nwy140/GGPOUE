@@ -29,6 +29,7 @@ public:
    virtual GGPOErrorCode IncrementFrame(void);
    virtual GGPOErrorCode DisconnectPlayer(GGPOPlayerHandle handle);
    virtual GGPOErrorCode GetNetworkStats(FGGPONetworkStats *stats, GGPOPlayerHandle handle);
+   virtual GGPOErrorCode SetPredictionWindow(int frames) { return _sync.SetPredictionWindow(frames) ? GGPO_OK : GGPO_ERRORCODE_INVALID_REQUEST; }
    virtual GGPOErrorCode SetFrameDelay(GGPOPlayerHandle player, int delay);
    virtual GGPOErrorCode SetDisconnectTimeout(int timeout);
    virtual GGPOErrorCode SetDisconnectNotifyStart(int timeout);

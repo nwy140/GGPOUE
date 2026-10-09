@@ -61,6 +61,9 @@ bool FGGPOTransportRoutingTest::RunTest(const FString&) {
    TestEqual(TEXT("Four-slot external transport startup"),
       GGPONet::ggpo_start_session(&session, &callbacks, &transport, "TransportTest", 4, 1), GGPO_OK);
    if (session) {
+      TestEqual(TEXT("Zero prediction window rejected"),GGPONet::ggpo_set_prediction_window(session,0),GGPO_ERRORCODE_INVALID_REQUEST);
+      TestEqual(TEXT("Oversized prediction window rejected"),GGPONet::ggpo_set_prediction_window(session,33),GGPO_ERRORCODE_INVALID_REQUEST);
+      TestEqual(TEXT("Maximum bounded window accepted before play"),GGPONet::ggpo_set_prediction_window(session,32),GGPO_OK);
       GGPOPlayer player = {};
       player.size = sizeof(player);
       player.type = EGGPOPlayerType::REMOTE;

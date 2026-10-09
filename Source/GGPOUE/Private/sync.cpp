@@ -49,9 +49,12 @@ void
 Sync::SetLastConfirmedFrame(int frame) 
 {   
    _last_confirmed_frame = frame;
-   if (_last_confirmed_frame > 0) {
+   // Delayed inputs can be confirmed before they have ever been simulated.
+   // Keep those inputs until the current timeline has actually consumed them.
+   const int discard_frame=MIN(frame-1,_framecount-1);
+   if (discard_frame >= 0) {
       for (int i = 0; i < _config.num_players; i++) {
-         _input_queues[i].DiscardConfirmedFrames(frame - 1);
+         _input_queues[i].DiscardConfirmedFrames(discard_frame);
       }
    }
 }

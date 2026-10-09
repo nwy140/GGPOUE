@@ -16,6 +16,7 @@
 #include "network/udp_msg.h"
 
 #define MAX_PREDICTION_FRAMES    8
+#define MAX_PREDICTION_CAPACITY  32
 
 class SyncTestBackend;
 
@@ -46,6 +47,7 @@ public:
 
    void SetLastConfirmedFrame(int frame);
    void SetFrameDelay(int queue, int delay);
+   bool SetPredictionWindow(int frames) { if(_framecount!=0 || frames<1 || frames>MAX_PREDICTION_CAPACITY)return false; _max_prediction_frames=frames;return true; }
    bool AddLocalInput(int queue, GameInput &input);
    void AddRemoteInput(int queue, GameInput &input);
    int GetConfirmedInputs(void *values, int size, int frame);
@@ -73,7 +75,7 @@ protected:
       SavedFrame() : buf(NULL), cbuf(0), frame(-1), checksum(0) { }
    };
    struct SavedState {
-      SavedFrame frames[MAX_PREDICTION_FRAMES + 2];
+      SavedFrame frames[MAX_PREDICTION_CAPACITY + 2];
       int head;
    };
 
